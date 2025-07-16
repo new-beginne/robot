@@ -1,4 +1,4 @@
-# filename: robot.py (The All-in-One: with Directory Selection RESTORED)
+# filename: robot.py (The All-in-One: Professional File Handling)
 import os
 import json
 import sys
@@ -7,8 +7,11 @@ from dataclasses import dataclass, field
 from typing import Dict, Any, List, Tuple, Callable
 import argparse
 
-# --- Constants and Core Logic (No changes needed here) ---
-BACKUP_DIR = Path('.backup')
+# --- MAJOR CHANGE: Centralized application data directory ---
+# All generated files will now be stored in the user's home directory to keep project folders clean.
+APP_DIR = Path.home() / ".craftly-robot"
+BACKUP_DIR = APP_DIR / "backups"
+INSTRUCTIONS_DIR = APP_DIR / "instructions"
 
 @dataclass
 class FileOperator:
@@ -50,30 +53,13 @@ class FileOperator:
 
 def save_backup(backup_file: Path, reverse_actions: List[dict]):
     if not reverse_actions: return
-    BACKUP_DIR.mkdir(exist_ok=True)
+    # --- CHANGE: Ensure the central backup directory exists ---
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     reverse_actions.reverse()
     backup_file.write_text(json.dumps(reverse_actions, indent=4))
 
-# --- ধাপ ১: ডিরেক্টরি বেছে নেওয়ার ফাংশনটি ফিরিয়ে আনা হয়েছে ---
-def get_directory_from_user():
-    """Asks the user for the working directory in wizard mode."""
-    current_dir = os.getcwd()
-    print(f"\nCurrent Directory: {current_dir}")
-    custom_dir = input("Enter target directory path (press Enter to use current directory): ").strip()
-    
-    dir_path = Path(custom_dir) if custom_dir else Path(current_dir)
-    
-    # Ensure the base directory exists before starting
-    dir_path.mkdir(parents=True, exist_ok=True)
-    print(f"✅ Working directory set to: {dir_path}")
-    return dir_path
-
-# --- Wizard with Number-based Menu ---
-# --- ধাপ ২: wizard ফাংশনটিকে base_path গ্রহণ করার জন্য পরিবর্তন করা হয়েছে ---
+# --- Wizard and Review logic (No changes needed in their internal logic) ---
 def run_wizard_flow(instructions: List[dict], base_path: Path):
-    """Builds upon an existing list of instructions using a number-based menu."""
-    # --- ধাপ ৩: এই লাইনটি মুছে ফেলা হয়েছে কারণ base_path এখন বাইরে থেকে আসছে ---
-    # base_path = Path(os.getcwd()) <-- This line is now removed.
     path_stack = [base_path]
     print("\n--- Interactive Instruction Builder ---")
     if instructions:
@@ -128,7 +114,6 @@ def run_wizard_flow(instructions: List[dict], base_path: Path):
         else: print("❌ Invalid choice.")
     return instructions
 
-# --- Review Stage with Undo ---
 def review_and_edit_instructions(instructions: List[dict]) -> List[dict] or None:
     instructions_backup = None
     while True:
@@ -206,10 +191,21 @@ def review_and_edit_instructions(instructions: List[dict]) -> List[dict] or None
             except Exception as e: print(f"An error occurred: {e}"); instructions_backup = None
         else: print("❌ Invalid choice.")
 
+def get_directory_from_user():
+    current_dir = os.getcwd()
+    print(f"\nCurrent Directory: {current_dir}")
+    custom_dir = input("Enter target directory path (press Enter to use current directory): ").strip()
+    dir_path = Path(custom_dir) if custom_dir else Path(current_dir)
+    dir_path.mkdir(parents=True, exist_ok=True)
+    print(f"✅ Working directory set to: {dir_path}")
+    return dir_path
+
 # --- Main Execution and Argument Parsing ---
 def execute_instructions(instructions: List[dict], input_path: Path):
     if not instructions: print("No operations to perform."); return
-    print("\n⚙️ Running operations..."); backup_file = BACKUP_DIR / input_path.with_suffix('.bak').name
+    # --- CHANGE: Backup file path now uses the central backup directory ---
+    backup_file = BACKUP_DIR / f"{input_path.stem}.bak"
+    print(f"\n⚙️ Running operations... (Backup will be saved to {backup_file})")
     completed_reverse_actions, was_successful = [], True
     for idx, instr in enumerate(instructions, 1):
         try:
@@ -238,8 +234,16 @@ def main():
     args = parse_args()
     if args.undo:
         if not args.input: print("✗ Error: --undo requires -i <file>", file=sys.stderr); sys.exit(1)
-        input_path, backup_file = Path(args.input), BACKUP_DIR / Path(args.input).with_suffix('.bak').name
-        if not backup_file.exists(): print(f"✗ No backup for '{input_path}' found.", file=sys.stderr); sys.exit(1)
+        # --- CHANGE: Undo logic now looks for files in the central app directory ---
+        input_path = Path(args.input)
+        if not input_path.is_absolute() and not input_path.exists():
+            # If a relative path is given (like instructions/auto_generated.json), check in the app dir
+            potential_path = INSTRUCTIONS_DIR / input_path.name
+            if potential_path.exists():
+                input_path = potential_path
+        
+        backup_file = BACKUP_DIR / f"{input_path.stem}.bak"
+        if not backup_file.exists(): print(f"✗ No backup for '{input_path}' found at '{backup_file}'.", file=sys.stderr); sys.exit(1)
         try:
             instructions_to_undo = json.loads(backup_file.read_text()); print(f"🔄 Undoing {len(instructions_to_undo)} actions...");
             for idx, instr in enumerate(instructions_to_undo, 1):
@@ -256,19 +260,22 @@ def main():
         except Exception as e: print(f"✗ Error reading file: {e}", file=sys.stderr); sys.exit(1)
     else: 
         print("🧙 Welcome to Craftly Robot Wizard!")
-        # --- ধাপ ৪: প্রথমে ডিরেক্টরি ইনপুট নেওয়া হচ্ছে...
         base_dir = get_directory_from_user()
         instructions = []
         while True:
-            # --- ...এবং সেটি wizard-কে পাস করা হচ্ছে ---
             instructions = run_wizard_flow(instructions, base_dir)
             if not instructions: break 
             final_instructions = review_and_edit_instructions(instructions)
             if final_instructions is None: continue
             else: instructions = final_instructions; break
         if not instructions: print("Process cancelled by user."); sys.exit(0)
-        output_folder = Path("instructions"); output_folder.mkdir(exist_ok=True)
-        input_file_path = output_folder / "auto_generated.json"
+        
+        # --- CHANGE: Save generated instructions to the central app directory ---
+        INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
+        # We can use a unique name, e.g., based on the root folder, to avoid overwrites
+        root_folder_name = Path(instructions[0]['path']).name
+        input_file_path = INSTRUCTIONS_DIR / f"{root_folder_name}_{os.getpid()}.json"
+        
         input_file_path.write_text(json.dumps(instructions, indent=4))
         print(f"\n✅ Instructions saved to '{input_file_path}' for undo purposes.")
 
