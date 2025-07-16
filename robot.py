@@ -1,4 +1,4 @@
-# filename: craftly_robot.py (The All-in-One: with a "Review Stage Undo" feature)
+# filename: robot.py (The All-in-One: with Directory Selection RESTORED)
 import os
 import json
 import sys
@@ -31,7 +31,7 @@ class FileOperator:
         if not method: raise ValueError(f"Unsupported operation: {self.op} {self.mode}")
         return method()
     def _create_folder(self) -> Tuple[str, dict]:
-        if not self.path.parent.exists(): raise FileNotFoundError(f"Missing parent folder: {self.path.parent}")
+        if not self.path.parent.exists(): raise FileNotFoundError(f"Missing parent directory: {self.path.parent}")
         self.path.mkdir(exist_ok=False); return f"created folder: {self.path}", {'operation': 'delete', 'mode': 'folder', 'path': str(self.path)}
     def _delete_folder(self) -> Tuple[str, dict]:
         if not self.path.is_dir(): raise FileNotFoundError(f"No such folder: {self.path}")
@@ -54,10 +54,26 @@ def save_backup(backup_file: Path, reverse_actions: List[dict]):
     reverse_actions.reverse()
     backup_file.write_text(json.dumps(reverse_actions, indent=4))
 
+# --- ধাপ ১: ডিরেক্টরি বেছে নেওয়ার ফাংশনটি ফিরিয়ে আনা হয়েছে ---
+def get_directory_from_user():
+    """Asks the user for the working directory in wizard mode."""
+    current_dir = os.getcwd()
+    print(f"\nCurrent Directory: {current_dir}")
+    custom_dir = input("Enter target directory path (press Enter to use current directory): ").strip()
+    
+    dir_path = Path(custom_dir) if custom_dir else Path(current_dir)
+    
+    # Ensure the base directory exists before starting
+    dir_path.mkdir(parents=True, exist_ok=True)
+    print(f"✅ Working directory set to: {dir_path}")
+    return dir_path
+
 # --- Wizard with Number-based Menu ---
-def run_wizard_flow(instructions: List[dict]):
+# --- ধাপ ২: wizard ফাংশনটিকে base_path গ্রহণ করার জন্য পরিবর্তন করা হয়েছে ---
+def run_wizard_flow(instructions: List[dict], base_path: Path):
     """Builds upon an existing list of instructions using a number-based menu."""
-    base_path = Path(os.getcwd())
+    # --- ধাপ ৩: এই লাইনটি মুছে ফেলা হয়েছে কারণ base_path এখন বাইরে থেকে আসছে ---
+    # base_path = Path(os.getcwd()) <-- This line is now removed.
     path_stack = [base_path]
     print("\n--- Interactive Instruction Builder ---")
     if instructions:
@@ -112,11 +128,10 @@ def run_wizard_flow(instructions: List[dict]):
         else: print("❌ Invalid choice.")
     return instructions
 
-# --- MAJOR UPDATE: Review Stage now has UNDO ---
+# --- Review Stage with Undo ---
 def review_and_edit_instructions(instructions: List[dict]) -> List[dict] or None:
-    instructions_backup = None # To store state for one-level undo
+    instructions_backup = None
     while True:
-        # Build and print the tree
         tree = {}; item_map = {}; item_counter = 1
         if not instructions: return []
         try:
@@ -137,35 +152,26 @@ def review_and_edit_instructions(instructions: List[dict]) -> List[dict] or None
                 item_counter += 1
                 if children: print_tree(children, full_path)
         print_tree(tree, common_base)
-
-        # Show the updated menu
         print("\n" + "-"*50); print("What to do now?"); 
         print("  1. Rename an item"); print("  2. Delete an item")
         print("  3. Copy an item"); print("  4. Move an item")
         print("  5. Go back and add more items")
-        if instructions_backup: # <-- NEW: Only show undo if there is something to undo
-            print("  6. Undo the last change")
+        if instructions_backup: print("  6. Undo the last change")
         print("  0. Looks good! Continue and execute."); print("-" * 50)
         
         choice = input("👉 Enter your choice: ").strip()
         
         if choice == '0': return instructions
         elif choice == '5': print("✅ Returning to the builder..."); return None
-        elif choice == '6' and instructions_backup: # <-- NEW: Handle Undo
-            instructions = instructions_backup
-            instructions_backup = None # Clear the backup so it can't be undone again
-            print("✅ The last change has been undone.")
-            continue # Restart the loop to show the restored state
+        elif choice == '6' and instructions_backup:
+            instructions, instructions_backup = instructions_backup, None
+            print("✅ The last change has been undone."); continue
         elif choice in ['1', '2', '3', '4']:
             try:
-                # --- NEW: Before any change, create a backup ---
                 instructions_backup = [instr.copy() for instr in instructions]
-                
                 item_num = int(input("👉 Enter the number of the item to act on: ").strip())
                 if item_num not in item_map: print("❌ Invalid item number."); instructions_backup = None; continue
                 source_path_str = item_map[item_num]['path']
-                
-                # ... (Rest of the logic is the same)
                 if choice == '1':
                     new_name = input(f"👉 Enter new name for '{Path(source_path_str).name}': ").strip()
                     if not new_name: print("❌ Name cannot be empty."); instructions_backup = None; continue
@@ -181,7 +187,7 @@ def review_and_edit_instructions(instructions: List[dict]) -> List[dict] or None
                 elif choice in ['3', '4']:
                     folder_map = {k: v['path'] for k, v in item_map.items() if v['is_folder']}
                     if not folder_map: print("❌ No destination folders available."); instructions_backup = None; continue
-                    print("\nAvailable destination folders:")
+                    print("\nAvailable destination folders:");
                     for num, path in folder_map.items(): print(f"  [{num}] {path}")
                     dest_num = int(input("👉 Enter destination folder number: ").strip())
                     if dest_num not in folder_map: print("❌ Invalid destination number."); instructions_backup = None; continue
@@ -200,7 +206,7 @@ def review_and_edit_instructions(instructions: List[dict]) -> List[dict] or None
             except Exception as e: print(f"An error occurred: {e}"); instructions_backup = None
         else: print("❌ Invalid choice.")
 
-# --- Main Execution and Argument Parsing (No changes needed) ---
+# --- Main Execution and Argument Parsing ---
 def execute_instructions(instructions: List[dict], input_path: Path):
     if not instructions: print("No operations to perform."); return
     print("\n⚙️ Running operations..."); backup_file = BACKUP_DIR / input_path.with_suffix('.bak').name
@@ -250,9 +256,12 @@ def main():
         except Exception as e: print(f"✗ Error reading file: {e}", file=sys.stderr); sys.exit(1)
     else: 
         print("🧙 Welcome to Craftly Robot Wizard!")
+        # --- ধাপ ৪: প্রথমে ডিরেক্টরি ইনপুট নেওয়া হচ্ছে...
+        base_dir = get_directory_from_user()
         instructions = []
         while True:
-            instructions = run_wizard_flow(instructions)
+            # --- ...এবং সেটি wizard-কে পাস করা হচ্ছে ---
+            instructions = run_wizard_flow(instructions, base_dir)
             if not instructions: break 
             final_instructions = review_and_edit_instructions(instructions)
             if final_instructions is None: continue
